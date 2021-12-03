@@ -97,29 +97,35 @@ Resources:
 
               Acceptable values as of 12/2021: Latest 18.x, Latest 20.x, Latest 21.x
               '''
-              candidate_image = ""
+
               major_version_num = major_version.split(' ')[1].split('.')[0]
+              result = { 'Ami': '', 'Version': ''}
 
               for image in image_list:
                   version = get_avi_version(image)
                   if version and version.startswith(major_version_num):
-                      if not candidate_image:
-                          candidate_image = image
-                      elif version > get_avi_version(candidate_image):
-                          candidate_image = image
+                      if not result['Ami']:
+                          result['Ami'] = image['ImageId']
+                          result['Version'] = version
+                      elif version > result['Version']:
+                          result['Ami'] = image['ImageId']
+                          result['Version'] = version
                       else:
                           pass
 
-              if not candidate_image:
+              if not result['Ami']:
                   raise AmiNotFound("No AMI could be found with the specified parameters")
 
-              return candidate_image['ImageId']
+              return result
 
           def get_ami_by_version_number(version_number, image_list):
+              result = { 'Ami': '', 'Version': '' }
               for image in image_list:
                   version = get_avi_version(image)
                   if version and version_number in version:
-                      return image['ImageId']
+                      result['Ami'] = image['ImageId']
+                      result['Version'] = version_number
+                      return result
               raise AmiNotFound("No AMI could be found with the specified parameters")
 
           def test_ami_permissions(ami, event, context):
@@ -158,7 +164,7 @@ Resources:
           images = response['Images']
 
           def lambda_handler(event, context):
-              requested_image = event['ResourceProperties']['ImageRequested']
+              requested_image_version = event['ResourceProperties']['VersionRequested']
               responseData = {}
 
               try:
@@ -166,29 +172,28 @@ Resources:
                       print('Delete Event Requested')
                       return(cfnresponse.send(event, context, cfnresponse.SUCCESS, {}))
 
-                  if "Latest" in requested_image:
-                      ami = get_latest_ami_by_major_version(requested_image, images)
+                  if "Latest" in requested_image_version:
+                      responseData = get_latest_ami_by_major_version(requested_image_version, images)
                   else:
-                      ami = get_ami_by_version_number(requested_image, images)
-                  responseData['Ami'] = ami
+                      responseData = get_ami_by_version_number(requested_image_version, images)
                   
               except Exception:
                   responseData = {}
                   responseData['Error'] = 'Execution error when performing AMI lookup. Please check logs'
                   response = cfnresponse.send(event, context, cfnresponse.FAILED, responseData)
-              
-              test_ami_permissions(ami, event, context)
-              
+                            
               cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
 
   AMIInfo:
     Type: Custom::AMIInfo
     Properties:
       ServiceToken: !GetAtt LambdaAMILookup.Arn
-      ImageRequested: !Ref Version
-  
+      VersionRequested: !Ref Version
 
 Outputs:
   AMI:
     Description: AMI Returned from Lambda
     Value: !GetAtt AMIInfo.Ami
+  Version:
+    Description: Version of Avi
+    Value: !GetAtt AMIInfo.Version
